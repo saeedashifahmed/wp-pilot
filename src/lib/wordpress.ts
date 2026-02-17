@@ -17,20 +17,13 @@ function sanitizeDbName(domain: string): string {
   return domain.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 16);
 }
 
-function summarizeCommandOutput(output: string, maxLength: number = 220): string {
-  const collapsed = output.replace(/\s+/g, ' ').trim();
-  if (!collapsed) return '';
-  return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 3)}...` : collapsed;
-}
-
 export async function installWordPress(
   conn: Client,
   site: SiteConfig,
   onProgress: ProgressCallback
 ): Promise<{
   success: boolean;
-  siteProtocol: 'http' | 'https';
-  sslEnabled: boolean;
+  sslInstalled: boolean;
   adminPassword: string;
   dbName: string;
   dbUser: string;
@@ -43,8 +36,7 @@ export async function installWordPress(
   const dbPassword = generatePassword();
   const adminPassword = generatePassword(16);
   const phpVersion = site.phpVersion || '8.3';
-  let siteProtocol: 'http' | 'https' = 'http';
-  let sslEnabled = false;
+  let sslInstalled = false;
 
   try {
     // Step 1: System update
@@ -298,6 +290,7 @@ NGINXEOF`;
       60000
     );
 
+    // Always install WP with http first; URL gets updated to https after Certbot succeeds
     const siteUrl = `http://${domain}`;
     
     const wpInstallCmd = `sudo -u www-data wp core install --path="${wpDir}" --url="${siteUrl}" --title="${site.siteTitle.replace(/"/g, '\\"')}" --admin_user="${site.adminUser}" --admin_password="${adminPassword}" --admin_email="${site.adminEmail}" --skip-email 2>&1`;
@@ -309,76 +302,15 @@ NGINXEOF`;
 
     onProgress('wp-install', 'completed', 'WordPress installed successfully');
 
-    // Step 10: SSL (optional)
-    if (site.enableSSL) {
-      onProgress('ssl', 'running', 'Setting up SSL with Let\'s Encrypt...');
-      
-      const certbotInstallResult = await execCommandWithTimeout(
-        conn,
-        'export DEBIAN_FRONTEND=noninteractive && sudo apt-get install -y certbot python3-certbot-nginx 2>&1',
-        120000
-      );
-      if (certbotInstallResult.code !== 0) {
-        const installDetails = summarizeCommandOutput(certbotInstallResult.stderr || certbotInstallResult.stdout);
-        onProgress(
-          'ssl',
-          'failed',
-          'Certbot installation failed. Site remains on HTTP.',
-          installDetails || 'Install certbot manually and run certbot --nginx.'
-        );
-      } else {
-        const certResult = await execCommandWithTimeout(
-          conn,
-          `sudo certbot --nginx -d ${domain} --non-interactive --agree-tos --email ${site.adminEmail} 2>&1`,
-          180000
-        );
-        
-        if (certResult.code !== 0) {
-          const certDetails = summarizeCommandOutput(certResult.stderr || certResult.stdout);
-          onProgress(
-            'ssl',
-            'failed',
-            'SSL setup failed. Site remains on HTTP.',
-            certDetails || 'Ensure DNS points to this server and port 80 is reachable, then rerun certbot.'
-          );
-        } else {
-          const httpsSiteUrl = `https://${domain}`;
-          const wpHomeUpdate = await execCommandWithTimeout(
-            conn,
-            `sudo -u www-data wp option update home "${httpsSiteUrl}" --path="${wpDir}" 2>&1`,
-            60000
-          );
-          const wpSiteUrlUpdate = await execCommandWithTimeout(
-            conn,
-            `sudo -u www-data wp option update siteurl "${httpsSiteUrl}" --path="${wpDir}" 2>&1`,
-            60000
-          );
-
-          if (wpHomeUpdate.code === 0 && wpSiteUrlUpdate.code === 0) {
-            siteProtocol = 'https';
-            sslEnabled = true;
-            onProgress('ssl', 'completed', 'SSL certificate installed and WordPress URL updated to HTTPS');
-          } else {
-            const wpUrlUpdateFailureOutput = wpHomeUpdate.code !== 0
-              ? (wpHomeUpdate.stderr || wpHomeUpdate.stdout)
-              : (wpSiteUrlUpdate.stderr || wpSiteUrlUpdate.stdout);
-            const wpUrlUpdateDetails = summarizeCommandOutput(wpUrlUpdateFailureOutput);
-            onProgress(
-              'ssl',
-              'failed',
-              'SSL certificate installed, but WordPress URL update failed. Site remains on HTTP.',
-              wpUrlUpdateDetails || 'Run wp option update home/siteurl manually once SSL is confirmed.'
-            );
-          }
-        }
-      }
-    }
-
-    // Step 11: Security hardening
+    // Step 10: Security hardening (must run BEFORE SSL so firewall allows port 443)
     onProgress('security', 'running', 'Applying security hardening...');
     
-    // Configure UFW firewall
-    await execCommand(conn, 'sudo ufw allow OpenSSH 2>/dev/null; sudo ufw allow "Nginx Full" 2>/dev/null; echo "y" | sudo ufw enable 2>/dev/null || true');
+    // Configure UFW firewall — allow SSH, HTTP, and HTTPS before enabling
+    await execCommand(conn, 'sudo ufw allow OpenSSH 2>/dev/null || true');
+    await execCommand(conn, 'sudo ufw allow 80/tcp 2>/dev/null || true');
+    await execCommand(conn, 'sudo ufw allow 443/tcp 2>/dev/null || true');
+    await execCommand(conn, 'sudo ufw allow "Nginx Full" 2>/dev/null || true');
+    await execCommand(conn, 'echo "y" | sudo ufw enable 2>/dev/null || true');
     
     // Harden PHP
     await execCommand(conn, `sudo sed -i 's/upload_max_filesize = .*/upload_max_filesize = 64M/' /etc/php/${phpVersion}/fpm/php.ini 2>/dev/null || true`);
@@ -389,13 +321,51 @@ NGINXEOF`;
     
     onProgress('security', 'completed', 'Security hardening applied');
 
+    // Step 11: SSL (optional)
+    if (site.enableSSL) {
+      onProgress('ssl', 'running', 'Setting up SSL with Let\'s Encrypt...');
+      
+      await execCommandWithTimeout(
+        conn,
+        'export DEBIAN_FRONTEND=noninteractive && sudo apt-get install -y certbot python3-certbot-nginx 2>&1',
+        120000
+      );
+
+      // Check if www subdomain resolves to the same server before including it
+      const serverIp = await execCommand(conn, 'curl -s ifconfig.me 2>/dev/null || curl -s icanhazip.com 2>/dev/null || hostname -I | awk \'{print $1}\'');
+      const wwwCheck = await execCommand(conn, `dig +short www.${domain} 2>/dev/null | head -1`);
+      
+      let certDomains = `-d ${domain}`;
+      if (wwwCheck.stdout.trim() && wwwCheck.stdout.trim() === serverIp.stdout.trim()) {
+        certDomains += ` -d www.${domain}`;
+      }
+
+      const certResult = await execCommandWithTimeout(
+        conn,
+        `sudo certbot --nginx ${certDomains} --non-interactive --agree-tos --email ${site.adminEmail} --redirect 2>&1`,
+        180000
+      );
+      
+      if (certResult.code !== 0) {
+        // Log the certbot output for debugging
+        const certError = certResult.stderr || certResult.stdout;
+        onProgress('ssl', 'completed', `SSL setup failed — ${certError.slice(0, 200)}. Run manually: sudo certbot --nginx -d ${domain}`);
+      } else {
+        // SSL succeeded — restart nginx to apply changes and update WordPress URL to https
+        await execCommand(conn, 'sudo systemctl restart nginx');
+        await execCommand(conn, `sudo -u www-data wp option update siteurl 'https://${domain}' --path="${wpDir}" 2>&1`);
+        await execCommand(conn, `sudo -u www-data wp option update home 'https://${domain}' --path="${wpDir}" 2>&1`);
+        sslInstalled = true;
+        onProgress('ssl', 'completed', 'SSL certificate installed and WordPress updated to HTTPS');
+      }
+    }
+
     // Final
     onProgress('complete', 'completed', 'WordPress installation complete!');
 
     return {
       success: true,
-      siteProtocol,
-      sslEnabled,
+      sslInstalled,
       adminPassword,
       dbName,
       dbUser,
@@ -406,8 +376,7 @@ NGINXEOF`;
     onProgress('error', 'failed', errorMessage);
     return {
       success: false,
-      siteProtocol: 'http',
-      sslEnabled: false,
+      sslInstalled: false,
       adminPassword: '',
       dbName: '',
       dbUser: '',
