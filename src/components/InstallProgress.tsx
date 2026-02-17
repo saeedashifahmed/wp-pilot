@@ -12,6 +12,7 @@ export interface StepInfo {
   label: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   message?: string;
+  details?: string;
 }
 
 interface Props {
@@ -93,6 +94,9 @@ export default function InstallProgress({ steps }: Props) {
                 >
                   {step.message}
                 </p>
+              )}
+              {step.details && step.status !== 'pending' && (
+                <p className="text-[11px] mt-0.5 text-gray-500 break-words">{step.details}</p>
               )}
             </div>
           </div>
