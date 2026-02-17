@@ -173,7 +173,7 @@ define('DB_COLLATE', '');
 
 ${salts}
 
-\\$table_prefix = 'wp_';
+\$table_prefix = 'wp_';
 
 define('WP_DEBUG', false);
 define('WP_MEMORY_LIMIT', '256M');
@@ -217,13 +217,13 @@ WPEOF`;
     client_max_body_size 64M;
 
     location / {
-        try_files \\$uri \\$uri/ /index.php?\\$args;
+        try_files \$uri \$uri/ /index.php?\$args;
     }
 
     location ~ \\.php$ {
         include snippets/fastcgi-params.conf;
         fastcgi_pass unix:/run/php/php${phpVersion}-fpm.sock;
-        fastcgi_param SCRIPT_FILENAME \\$document_root\\$fastcgi_script_name;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
         include fastcgi_params;
     }
 
