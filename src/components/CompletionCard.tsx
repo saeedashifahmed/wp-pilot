@@ -22,36 +22,11 @@ interface ResultData {
   dbName: string;
   dbUser: string;
   dbPassword: string;
-  sslRequested: boolean;
-  sslEnabled: boolean;
-}
-
-interface CopyButtonProps {
-  text: string;
-  label: string;
-  copied: string | null;
-  onCopy: (text: string, label: string) => void;
 }
 
 interface Props {
   result: ResultData;
   onReset: () => void;
-}
-
-function CopyButton({ text, label, copied, onCopy }: CopyButtonProps) {
-  return (
-    <button
-      onClick={() => onCopy(text, label)}
-      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
-      title="Copy"
-    >
-      {copied === label ? (
-        <CheckCircle2 size={14} className="text-green-600" />
-      ) : (
-        <Copy size={14} />
-      )}
-    </button>
-  );
 }
 
 export default function CompletionCard({ result, onReset }: Props) {
@@ -63,6 +38,20 @@ export default function CompletionCard({ result, onReset }: Props) {
     setCopied(label);
     setTimeout(() => setCopied(null), 2000);
   };
+
+  const CopyButton = ({ text, label }: { text: string; label: string }) => (
+    <button
+      onClick={() => copyToClipboard(text, label)}
+      className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+      title="Copy"
+    >
+      {copied === label ? (
+        <CheckCircle2 size={14} className="text-green-600" />
+      ) : (
+        <Copy size={14} />
+      )}
+    </button>
+  );
 
   return (
     <div className="bg-white rounded-xl border border-green-200 p-5 sm:p-6 shadow-sm">
@@ -101,15 +90,6 @@ export default function CompletionCard({ result, onReset }: Props) {
         </a>
       </div>
 
-      {result.sslRequested && !result.sslEnabled && (
-        <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <p className="text-xs text-amber-800">
-            SSL could not be activated automatically. Your site is running on HTTP. Verify DNS and firewall rules, then run:
-            <code className="mx-1 px-1.5 py-0.5 rounded bg-amber-100 border border-amber-200">sudo certbot --nginx -d your-domain.com</code>
-          </p>
-        </div>
-      )}
-
       {/* Toggle passwords */}
       <div className="flex justify-end mb-3">
         <button
@@ -134,14 +114,14 @@ export default function CompletionCard({ result, onReset }: Props) {
               <span className="text-sm text-gray-600">URL</span>
               <span className="flex items-center gap-1.5">
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border">{result.adminUrl}</code>
-                <CopyButton text={result.adminUrl} label="adminUrl" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.adminUrl} label="adminUrl" />
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">Username</span>
               <span className="flex items-center gap-1.5">
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border">{result.adminUser}</code>
-                <CopyButton text={result.adminUser} label="adminUser" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.adminUser} label="adminUser" />
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -150,7 +130,7 @@ export default function CompletionCard({ result, onReset }: Props) {
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border font-mono">
                   {showPasswords ? result.adminPassword : '••••••••••••'}
                 </code>
-                <CopyButton text={result.adminPassword} label="adminPassword" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.adminPassword} label="adminPassword" />
               </span>
             </div>
           </div>
@@ -167,14 +147,14 @@ export default function CompletionCard({ result, onReset }: Props) {
               <span className="text-sm text-gray-600">Database</span>
               <span className="flex items-center gap-1.5">
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border">{result.dbName}</code>
-                <CopyButton text={result.dbName} label="dbName" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.dbName} label="dbName" />
               </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">User</span>
               <span className="flex items-center gap-1.5">
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border">{result.dbUser}</code>
-                <CopyButton text={result.dbUser} label="dbUser" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.dbUser} label="dbUser" />
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -183,7 +163,7 @@ export default function CompletionCard({ result, onReset }: Props) {
                 <code className="text-sm text-gray-900 bg-white px-2 py-0.5 rounded border font-mono">
                   {showPasswords ? result.dbPassword : '••••••••••••'}
                 </code>
-                <CopyButton text={result.dbPassword} label="dbPassword" copied={copied} onCopy={copyToClipboard} />
+                <CopyButton text={result.dbPassword} label="dbPassword" />
               </span>
             </div>
           </div>

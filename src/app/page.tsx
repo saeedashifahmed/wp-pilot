@@ -14,8 +14,6 @@ interface InstallResult {
   dbName: string;
   dbUser: string;
   dbPassword: string;
-  sslRequested: boolean;
-  sslEnabled: boolean;
 }
 
 export default function Home() {

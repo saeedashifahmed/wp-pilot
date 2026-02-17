@@ -50,20 +50,19 @@ export async function POST(request: Request) {
           const result = await installWordPress(conn, siteConfig, sendEvent);
 
           if (result.success) {
+            const protocol = siteConfig.enableSSL ? 'https' : 'http';
             const completionData = {
               step: 'done',
               status: 'completed',
               message: 'Installation complete!',
               result: {
-                siteUrl: `${result.siteProtocol}://${siteConfig.domain}`,
-                adminUrl: `${result.siteProtocol}://${siteConfig.domain}/wp-admin`,
+                siteUrl: `${protocol}://${siteConfig.domain}`,
+                adminUrl: `${protocol}://${siteConfig.domain}/wp-admin`,
                 adminUser: siteConfig.adminUser,
                 adminPassword: result.adminPassword,
                 dbName: result.dbName,
                 dbUser: result.dbUser,
                 dbPassword: result.dbPassword,
-                sslRequested: siteConfig.enableSSL,
-                sslEnabled: result.sslEnabled,
               },
             };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));
