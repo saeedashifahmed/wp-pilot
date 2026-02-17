@@ -63,6 +63,8 @@ export async function POST(request: Request) {
                 dbName: result.dbName,
                 dbUser: result.dbUser,
                 dbPassword: result.dbPassword,
+                sslRequested: siteConfig.enableSSL,
+                sslEnabled: result.sslInstalled,
               },
             };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));

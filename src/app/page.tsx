@@ -56,8 +56,17 @@ export default function Home() {
         });
 
         if (!response.ok) {
-          const errData = await response.json();
-          throw new Error(errData.error || 'Installation request failed');
+          let errorMessage = `Server returned ${response.status}`;
+          try {
+            const text = await response.text();
+            if (text) {
+              const errData = JSON.parse(text);
+              errorMessage = errData.error || errorMessage;
+            }
+          } catch {
+            // Response body was not valid JSON — use status-based message
+          }
+          throw new Error(errorMessage);
         }
 
         const reader = response.body?.getReader();
