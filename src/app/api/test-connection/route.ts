@@ -1,17 +1,32 @@
 import { NextResponse } from 'next/server';
-import { createSSHConnection, execCommand } from '@/lib/ssh';
 import type { ServerConfig } from '@/types';
 
+// Force Node.js runtime — ssh2 requires native modules
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 export async function POST(request: Request) {
+  let body: Record<string, unknown>;
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: 'Invalid request body' },
+      { status: 400 }
+    );
+  }
+
+  try {
+    // Dynamic import to catch module load failures gracefully
+    const { createSSHConnection, execCommand } = await import('@/lib/ssh');
+
     const config: ServerConfig = {
-      host: body.host,
-      port: body.port || 22,
-      username: body.username,
-      authMethod: body.authMethod || 'password',
-      password: body.password,
-      privateKey: body.privateKey,
+      host: String(body.host || '').trim(),
+      port: Number(body.port) || 22,
+      username: String(body.username || '').trim(),
+      authMethod: body.authMethod === 'key' ? 'key' : 'password',
+      password: body.password ? String(body.password) : undefined,
+      privateKey: body.privateKey ? String(body.privateKey) : undefined,
     };
 
     if (!config.host || !config.username) {
