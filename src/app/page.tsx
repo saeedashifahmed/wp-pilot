@@ -4,31 +4,21 @@ import { useState, useCallback } from 'react';
 import Header from '@/components/Header';
 import ServerForm from '@/components/ServerForm';
 import InstallProgress, { type StepInfo } from '@/components/InstallProgress';
-import CompletionCard from '@/components/CompletionCard';
-
-interface InstallResult {
-  siteUrl: string;
-  adminUrl: string;
-  adminUser: string;
-  adminPassword: string;
-  dbName: string;
-  dbUser: string;
-  dbPassword: string;
-}
+import CompletionCard, { type ResultData } from '@/components/CompletionCard';
 
 export default function Home() {
   const [isInstalling, setIsInstalling] = useState(false);
   const [steps, setSteps] = useState<StepInfo[]>([]);
-  const [result, setResult] = useState<InstallResult | null>(null);
+  const [result, setResult] = useState<ResultData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const updateStep = useCallback((id: string, status: StepInfo['status'], message?: string) => {
+  const updateStep = useCallback((id: string, status: StepInfo['status'], message?: string, details?: string) => {
     setSteps((prev) => {
       const existing = prev.find((s) => s.id === id);
       if (existing) {
-        return prev.map((s) => (s.id === id ? { ...s, status, message } : s));
+        return prev.map((s) => (s.id === id ? { ...s, status, message, details } : s));
       }
-      return [...prev, { id, label: id, status, message }];
+      return [...prev, { id, label: id, status, message, details }];
     });
   }, []);
 
@@ -76,7 +66,7 @@ export default function Home() {
                 } else if (parsed.step === 'error') {
                   setError(parsed.message);
                 } else {
-                  updateStep(parsed.step, parsed.status, parsed.message);
+                  updateStep(parsed.step, parsed.status, parsed.message, parsed.details);
                 }
               } catch {
                 // skip invalid JSON

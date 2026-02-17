@@ -1,37 +1,92 @@
 import { createSSHConnection } from '@/lib/ssh';
 import { installWordPress } from '@/lib/wordpress';
+import type { Client } from 'ssh2';
+import {
+  isValidDomain,
+  isValidEmail,
+  isValidHost,
+  isValidWpUsername,
+  normalizeDomain,
+  normalizeHost,
+  normalizePrivateKey,
+  parsePhpVersion,
+  parsePort,
+} from '@/lib/validation';
 import type { ServerConfig, SiteConfig } from '@/types';
 
 export const maxDuration = 300; // 5 minutes for serverless platforms
+
+function jsonError(error: string, status: number = 400): Response {
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
 
+    const host = normalizeHost(body.host);
+    const username = typeof body.username === 'string' ? body.username.trim() : '';
+    const port = parsePort(body.port, 22);
+    const authMethod: ServerConfig['authMethod'] = body.authMethod === 'key' ? 'key' : 'password';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const privateKey = normalizePrivateKey(body.privateKey);
+
+    const domain = normalizeDomain(body.domain);
+    const siteTitle = typeof body.siteTitle === 'string' && body.siteTitle.trim() ? body.siteTitle.trim() : 'My WordPress Site';
+    const adminUser = typeof body.adminUser === 'string' && body.adminUser.trim() ? body.adminUser.trim() : 'admin';
+    const rawAdminEmail = typeof body.adminEmail === 'string' ? body.adminEmail.trim() : '';
+    const adminEmail = rawAdminEmail || `admin@${domain}`;
+    const phpVersion = parsePhpVersion(body.phpVersion, '8.3');
+    const enableSSL = body.enableSSL === true;
+
+    if (!host || !username || !domain) {
+      return jsonError('Host, username, and domain are required');
+    }
+    if (!isValidHost(host)) {
+      return jsonError('Invalid host value');
+    }
+    if (port === null) {
+      return jsonError('Port must be an integer between 1 and 65535');
+    }
+    if (authMethod === 'password' && !password) {
+      return jsonError('Password is required for password authentication');
+    }
+    if (authMethod === 'key' && !privateKey) {
+      return jsonError('Private key is required for key authentication');
+    }
+    if (!isValidDomain(domain)) {
+      return jsonError('Please provide a valid domain name (example.com)');
+    }
+    if (!isValidWpUsername(adminUser)) {
+      return jsonError('Admin username may only contain letters, numbers, ".", "_" or "-"');
+    }
+    if (!isValidEmail(adminEmail)) {
+      return jsonError('Please provide a valid admin email address');
+    }
+    if (!phpVersion) {
+      return jsonError('Unsupported PHP version selected');
+    }
+
     const serverConfig: ServerConfig = {
-      host: body.host,
-      port: body.port || 22,
-      username: body.username,
-      authMethod: body.authMethod || 'password',
-      password: body.password,
-      privateKey: body.privateKey,
+      host,
+      port,
+      username,
+      authMethod,
+      password: authMethod === 'password' ? password : undefined,
+      privateKey: authMethod === 'key' ? privateKey : undefined,
     };
 
     const siteConfig: SiteConfig = {
-      domain: body.domain,
-      siteTitle: body.siteTitle || 'My WordPress Site',
-      adminUser: body.adminUser || 'admin',
-      adminEmail: body.adminEmail || `admin@${body.domain}`,
-      enableSSL: body.enableSSL ?? false,
-      phpVersion: body.phpVersion || '8.3',
+      domain,
+      siteTitle,
+      adminUser,
+      adminEmail,
+      enableSSL,
+      phpVersion,
     };
-
-    if (!serverConfig.host || !serverConfig.username || !siteConfig.domain) {
-      return new Response(
-        JSON.stringify({ error: 'Host, username, and domain are required' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
 
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
@@ -41,7 +96,7 @@ export async function POST(request: Request) {
           controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         };
 
-        let conn;
+        let conn: Client | null = null;
         try {
           sendEvent('connecting', 'running', 'Connecting to server...');
           conn = await createSSHConnection(serverConfig);
@@ -50,7 +105,7 @@ export async function POST(request: Request) {
           const result = await installWordPress(conn, siteConfig, sendEvent);
 
           if (result.success) {
-            const protocol = siteConfig.enableSSL ? 'https' : 'http';
+            const protocol = result.sslEnabled ? 'https' : 'http';
             const completionData = {
               step: 'done',
               status: 'completed',
@@ -63,6 +118,8 @@ export async function POST(request: Request) {
                 dbName: result.dbName,
                 dbUser: result.dbUser,
                 dbPassword: result.dbPassword,
+                sslRequested: siteConfig.enableSSL,
+                sslEnabled: result.sslEnabled,
               },
             };
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(completionData)}\n\n`));

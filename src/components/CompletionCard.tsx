@@ -14,7 +14,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 
-interface ResultData {
+export interface ResultData {
   siteUrl: string;
   adminUrl: string;
   adminUser: string;
