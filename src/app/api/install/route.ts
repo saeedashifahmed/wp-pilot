@@ -50,7 +50,7 @@ export async function POST(request: Request) {
           const result = await installWordPress(conn, siteConfig, sendEvent);
 
           if (result.success) {
-            const protocol = siteConfig.enableSSL ? 'https' : 'http';
+            const protocol = result.sslInstalled ? 'https' : 'http';
             const completionData = {
               step: 'done',
               status: 'completed',
