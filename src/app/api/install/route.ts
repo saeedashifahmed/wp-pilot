@@ -1,9 +1,27 @@
 import type { ServerConfig, SiteConfig } from '@/types';
+import {
+  isValidDomain,
+  isValidEmail,
+  isValidHost,
+  isValidWpUsername,
+  normalizeDomain,
+  normalizeHost,
+  normalizePrivateKey,
+  parsePhpVersion,
+  parsePort,
+} from '@/lib/validation';
 
 // Force Node.js runtime — ssh2 requires native modules not available in Edge
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 300; // 5 minutes for serverless platforms
+
+function jsonError(message: string, status: number = 400): Response {
+  return new Response(JSON.stringify({ error: message }), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
 
 export async function POST(request: Request) {
   // Step 1: Parse request body safely
@@ -11,40 +29,64 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return new Response(
-      JSON.stringify({ error: 'Invalid request body. Please submit the form again.' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    );
+    return jsonError('Invalid request body. Please submit the form again.');
   }
 
   // Step 2: Validate required fields
-  const host = String(body.host || '').trim();
+  const host = normalizeHost(body.host);
   const username = String(body.username || '').trim();
-  const domain = String(body.domain || '').trim();
+  const domain = normalizeDomain(body.domain);
+  const port = parsePort(body.port);
+  const authMethod = body.authMethod === 'key' ? 'key' : 'password';
 
-  if (!host || !username || !domain) {
-    return new Response(
-      JSON.stringify({ error: 'Host, username, and domain are required' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } }
-    );
+  const password = typeof body.password === 'string' ? body.password : '';
+  const privateKey = normalizePrivateKey(body.privateKey);
+  const siteTitle = String(body.siteTitle || 'My WordPress Site').trim() || 'My WordPress Site';
+  const adminUser = String(body.adminUser || 'admin').trim() || 'admin';
+  const adminEmail = String(body.adminEmail || `admin@${domain}`).trim().toLowerCase();
+  const phpVersion = parsePhpVersion(body.phpVersion);
+
+  if (!isValidHost(host) || !username || !domain) {
+    return jsonError('Host, username, and domain are required.');
+  }
+  if (!isValidDomain(domain)) {
+    return jsonError('Domain format is invalid. Use a fully qualified domain like example.com.');
+  }
+  if (port === null) {
+    return jsonError('Port must be an integer between 1 and 65535.');
+  }
+  if (authMethod === 'password' && !password) {
+    return jsonError('Password is required for password authentication.');
+  }
+  if (authMethod === 'key' && !privateKey) {
+    return jsonError('Private key is required for key authentication.');
+  }
+  if (!isValidWpUsername(adminUser)) {
+    return jsonError('Admin username must be 1-60 characters using letters, numbers, dots, underscores, or hyphens.');
+  }
+  if (!isValidEmail(adminEmail)) {
+    return jsonError('Admin email format is invalid.');
+  }
+  if (!phpVersion) {
+    return jsonError('Unsupported PHP version. Supported versions: 8.1, 8.2, 8.3, 8.4.');
   }
 
   const serverConfig: ServerConfig = {
     host,
-    port: Number(body.port) || 22,
+    port,
     username,
-    authMethod: body.authMethod === 'key' ? 'key' : 'password',
-    password: body.password ? String(body.password) : undefined,
-    privateKey: body.privateKey ? String(body.privateKey) : undefined,
+    authMethod,
+    password: authMethod === 'password' ? password : undefined,
+    privateKey: authMethod === 'key' ? privateKey : undefined,
   };
 
   const siteConfig: SiteConfig = {
     domain,
-    siteTitle: String(body.siteTitle || 'My WordPress Site'),
-    adminUser: String(body.adminUser || 'admin'),
-    adminEmail: String(body.adminEmail || `admin@${domain}`),
+    siteTitle,
+    adminUser,
+    adminEmail,
     enableSSL: Boolean(body.enableSSL),
-    phpVersion: String(body.phpVersion || '8.3'),
+    phpVersion,
   };
 
   // Step 3: Dynamically import ssh2-dependent modules to catch load failures
@@ -57,9 +99,9 @@ export async function POST(request: Request) {
     installWordPress = wpModule.installWordPress;
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Unknown module error';
-    return new Response(
-      JSON.stringify({ error: `Server setup error: ${msg}. The SSH module may not be compatible with this hosting platform.` }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+    return jsonError(
+      `Server setup error: ${msg}. The SSH module may not be compatible with this hosting platform.`,
+      500
     );
   }
 
@@ -87,7 +129,7 @@ export async function POST(request: Request) {
         conn = await createSSHConnection(serverConfig);
         sendEvent('connecting', 'completed', 'Connected to server');
 
-        const result = await installWordPress(conn, siteConfig, sendEvent);
+        const result = await installWordPress(conn, siteConfig, sendEvent, serverConfig.port);
 
         if (result.success) {
           const protocol = result.sslInstalled ? 'https' : 'http';

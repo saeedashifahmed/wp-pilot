@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { ServerConfig } from '@/types';
+import {
+  isValidHost,
+  normalizeHost,
+  normalizePrivateKey,
+  parsePort,
+} from '@/lib/validation';
 
 // Force Node.js runtime — ssh2 requires native modules
 export const runtime = 'nodejs';
@@ -16,27 +22,57 @@ export async function POST(request: Request) {
     );
   }
 
+  const host = normalizeHost(body.host);
+  const port = parsePort(body.port);
+  const username = String(body.username || '').trim();
+  const authMethod = body.authMethod === 'key' ? 'key' : 'password';
+  const password = typeof body.password === 'string' ? body.password : '';
+  const privateKey = normalizePrivateKey(body.privateKey);
+
+  if (!isValidHost(host) || !username) {
+    return NextResponse.json(
+      { success: false, error: 'Host and username are required' },
+      { status: 400 }
+    );
+  }
+
+  if (port === null) {
+    return NextResponse.json(
+      { success: false, error: 'Port must be an integer between 1 and 65535' },
+      { status: 400 }
+    );
+  }
+
+  if (authMethod === 'password' && !password) {
+    return NextResponse.json(
+      { success: false, error: 'Password is required for password authentication' },
+      { status: 400 }
+    );
+  }
+
+  if (authMethod === 'key' && !privateKey) {
+    return NextResponse.json(
+      { success: false, error: 'Private key is required for key authentication' },
+      { status: 400 }
+    );
+  }
+
+  let conn: Awaited<ReturnType<(typeof import('@/lib/ssh'))['createSSHConnection']>> | null = null;
+
   try {
     // Dynamic import to catch module load failures gracefully
     const { createSSHConnection, execCommand } = await import('@/lib/ssh');
 
     const config: ServerConfig = {
-      host: String(body.host || '').trim(),
-      port: Number(body.port) || 22,
-      username: String(body.username || '').trim(),
-      authMethod: body.authMethod === 'key' ? 'key' : 'password',
-      password: body.password ? String(body.password) : undefined,
-      privateKey: body.privateKey ? String(body.privateKey) : undefined,
-    };
-
-    if (!config.host || !config.username) {
-      return NextResponse.json(
-        { success: false, error: 'Host and username are required' },
-        { status: 400 }
-      );
+      host,
+      port,
+      username,
+      authMethod,
+      password: authMethod === 'password' ? password : undefined,
+      privateKey: authMethod === 'key' ? privateKey : undefined,
     }
 
-    const conn = await createSSHConnection(config);
+    conn = await createSSHConnection(config);
     
     // Get basic server info
     const [osInfo, memInfo, diskInfo] = await Promise.all([
@@ -61,5 +97,13 @@ export async function POST(request: Request) {
       { success: false, error: message },
       { status: 500 }
     );
+  } finally {
+    try {
+      if (conn) {
+        conn.end();
+      }
+    } catch {
+      // Ignore connection cleanup errors
+    }
   }
 }

@@ -48,6 +48,8 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
   const [connectionStatus, setConnectionStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [connectionError, setConnectionError] = useState('');
+  const parsedPort = Number.parseInt(port, 10);
+  const hasValidPort = Number.isInteger(parsedPort) && parsedPort >= 1 && parsedPort <= 65535;
 
   const testConnection = async () => {
     setTesting(true);
@@ -58,7 +60,7 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
       const res = await fetch('/api/test-connection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ host, port: parseInt(port), username, authMethod, password, privateKey }),
+        body: JSON.stringify({ host, port: hasValidPort ? parsedPort : port, username, authMethod, password, privateKey }),
       });
 
       const data = await res.json();
@@ -81,7 +83,7 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
     e.preventDefault();
     onInstall({
       host,
-      port: parseInt(port),
+      port: hasValidPort ? parsedPort : port,
       username,
       authMethod,
       password,
@@ -95,7 +97,7 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
     });
   };
 
-  const canInstall = host && username && domain && (authMethod === 'password' ? password : privateKey);
+  const canInstall = Boolean(host && username && domain && hasValidPort && (authMethod === 'password' ? password : privateKey));
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -124,10 +126,16 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
               type="number"
               value={port}
               onChange={(e) => setPort(e.target.value)}
+              min={1}
+              max={65535}
+              required
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-shadow"
             />
           </div>
         </div>
+        {!hasValidPort && (
+          <p className="mt-2 text-xs text-red-600">Port must be between 1 and 65535.</p>
+        )}
 
         <div className="mt-4">
           <label className="block text-sm font-medium text-gray-700 mb-1.5">Username</label>
@@ -211,7 +219,7 @@ export default function ServerForm({ onInstall, isInstalling }: Props) {
           <button
             type="button"
             onClick={testConnection}
-            disabled={testing || !host || !username || (authMethod === 'password' ? !password : !privateKey)}
+            disabled={testing || !host || !username || !hasValidPort || (authMethod === 'password' ? !password : !privateKey)}
             className="px-4 py-2.5 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {testing ? (
