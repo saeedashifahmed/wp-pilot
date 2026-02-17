@@ -14,16 +14,7 @@ interface InstallResult {
   dbName: string;
   dbUser: string;
   dbPassword: string;
-  sslRequested: boolean;
-  sslEnabled: boolean;
 }
-
-const INITIAL_INSTALL_STEP: StepInfo = {
-  id: 'connecting',
-  label: 'connecting',
-  status: 'running',
-  message: 'Starting installation...',
-};
 
 export default function Home() {
   const [isInstalling, setIsInstalling] = useState(false);
@@ -31,20 +22,20 @@ export default function Home() {
   const [result, setResult] = useState<InstallResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const updateStep = useCallback((id: string, status: StepInfo['status'], message?: string, details?: string) => {
+  const updateStep = useCallback((id: string, status: StepInfo['status'], message?: string) => {
     setSteps((prev) => {
       const existing = prev.find((s) => s.id === id);
       if (existing) {
-        return prev.map((s) => (s.id === id ? { ...s, status, message, details } : s));
+        return prev.map((s) => (s.id === id ? { ...s, status, message } : s));
       }
-      return [...prev, { id, label: id, status, message, details }];
+      return [...prev, { id, label: id, status, message }];
     });
   }, []);
 
   const handleInstall = useCallback(
     async (data: Record<string, unknown>) => {
       setIsInstalling(true);
-      setSteps([INITIAL_INSTALL_STEP]);
+      setSteps([]);
       setResult(null);
       setError(null);
 
@@ -56,17 +47,8 @@ export default function Home() {
         });
 
         if (!response.ok) {
-          let errorMessage = `Server returned ${response.status}`;
-          try {
-            const text = await response.text();
-            if (text) {
-              const errData = JSON.parse(text);
-              errorMessage = errData.error || errorMessage;
-            }
-          } catch {
-            // Response body was not valid JSON — use status-based message
-          }
-          throw new Error(errorMessage);
+          const errData = await response.json();
+          throw new Error(errData.error || 'Installation request failed');
         }
 
         const reader = response.body?.getReader();
@@ -74,26 +56,6 @@ export default function Home() {
 
         const decoder = new TextDecoder();
         let buffer = '';
-        let hasTerminalEvent = false;
-
-        const processEventLine = (line: string) => {
-          if (!line.startsWith('data: ')) return;
-          try {
-            const parsed = JSON.parse(line.slice(6));
-
-            if (parsed.step === 'done' && parsed.result) {
-              hasTerminalEvent = true;
-              setResult(parsed.result);
-            } else if (parsed.step === 'error') {
-              hasTerminalEvent = true;
-              setError(parsed.message);
-            } else {
-              updateStep(parsed.step, parsed.status, parsed.message, parsed.details);
-            }
-          } catch {
-            // skip invalid JSON
-          }
-        };
 
         while (true) {
           const { done, value } = await reader.read();
@@ -105,16 +67,22 @@ export default function Home() {
           buffer = lines.pop() || '';
 
           for (const line of lines) {
-            processEventLine(line.trim());
+            if (line.startsWith('data: ')) {
+              try {
+                const parsed = JSON.parse(line.slice(6));
+
+                if (parsed.step === 'done' && parsed.result) {
+                  setResult(parsed.result);
+                } else if (parsed.step === 'error') {
+                  setError(parsed.message);
+                } else {
+                  updateStep(parsed.step, parsed.status, parsed.message);
+                }
+              } catch {
+                // skip invalid JSON
+              }
+            }
           }
-        }
-
-        if (buffer.trim()) {
-          processEventLine(buffer.trim());
-        }
-
-        if (!hasTerminalEvent) {
-          throw new Error('Installer connection ended before completion. Check server SSH/network and retry.');
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Unknown error';
@@ -158,7 +126,7 @@ export default function Home() {
           )}
 
           {/* Show progress during installation */}
-          {isInstalling && <InstallProgress steps={steps} />}
+          {isInstalling && steps.length > 0 && <InstallProgress steps={steps} />}
 
           {/* Show error */}
           {error && !isInstalling && (
