@@ -17,12 +17,20 @@ function sanitizeDbName(domain: string): string {
   return domain.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 16);
 }
 
+function summarizeCommandOutput(output: string, maxLength: number = 220): string {
+  const collapsed = output.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return '';
+  return collapsed.length > maxLength ? `${collapsed.slice(0, maxLength - 3)}...` : collapsed;
+}
+
 export async function installWordPress(
   conn: Client,
   site: SiteConfig,
   onProgress: ProgressCallback
 ): Promise<{
   success: boolean;
+  siteProtocol: 'http' | 'https';
+  sslEnabled: boolean;
   adminPassword: string;
   dbName: string;
   dbUser: string;
@@ -35,6 +43,8 @@ export async function installWordPress(
   const dbPassword = generatePassword();
   const adminPassword = generatePassword(16);
   const phpVersion = site.phpVersion || '8.3';
+  let siteProtocol: 'http' | 'https' = 'http';
+  let sslEnabled = false;
 
   try {
     // Step 1: System update
@@ -288,8 +298,7 @@ NGINXEOF`;
       60000
     );
 
-    const protocol = site.enableSSL ? 'https' : 'http';
-    const siteUrl = `${protocol}://${domain}`;
+    const siteUrl = `http://${domain}`;
     
     const wpInstallCmd = `sudo -u www-data wp core install --path="${wpDir}" --url="${siteUrl}" --title="${site.siteTitle.replace(/"/g, '\\"')}" --admin_user="${site.adminUser}" --admin_password="${adminPassword}" --admin_email="${site.adminEmail}" --skip-email 2>&1`;
     
@@ -304,22 +313,64 @@ NGINXEOF`;
     if (site.enableSSL) {
       onProgress('ssl', 'running', 'Setting up SSL with Let\'s Encrypt...');
       
-      await execCommandWithTimeout(
+      const certbotInstallResult = await execCommandWithTimeout(
         conn,
         'export DEBIAN_FRONTEND=noninteractive && sudo apt-get install -y certbot python3-certbot-nginx 2>&1',
         120000
       );
-
-      const certResult = await execCommandWithTimeout(
-        conn,
-        `sudo certbot --nginx -d ${domain} -d www.${domain} --non-interactive --agree-tos --email ${site.adminEmail} --redirect 2>&1`,
-        120000
-      );
-      
-      if (certResult.code !== 0) {
-        onProgress('ssl', 'completed', 'SSL setup skipped — ensure DNS points to this server first, then run: sudo certbot --nginx');
+      if (certbotInstallResult.code !== 0) {
+        const installDetails = summarizeCommandOutput(certbotInstallResult.stderr || certbotInstallResult.stdout);
+        onProgress(
+          'ssl',
+          'failed',
+          'Certbot installation failed. Site remains on HTTP.',
+          installDetails || 'Install certbot manually and run certbot --nginx'
+        );
       } else {
-        onProgress('ssl', 'completed', 'SSL certificate installed');
+        const certResult = await execCommandWithTimeout(
+          conn,
+          `sudo certbot --nginx -d ${domain} --non-interactive --agree-tos --email ${site.adminEmail} 2>&1`,
+          180000
+        );
+        
+        if (certResult.code !== 0) {
+          const certDetails = summarizeCommandOutput(certResult.stderr || certResult.stdout);
+          onProgress(
+            'ssl',
+            'failed',
+            'SSL setup failed. Site remains on HTTP.',
+            certDetails || 'Ensure DNS points to this server and port 80 is reachable, then rerun certbot.'
+          );
+        } else {
+          const httpsSiteUrl = `https://${domain}`;
+          const wpHomeUpdate = await execCommandWithTimeout(
+            conn,
+            `sudo -u www-data wp option update home "${httpsSiteUrl}" --path="${wpDir}" 2>&1`,
+            60000
+          );
+          const wpSiteUrlUpdate = await execCommandWithTimeout(
+            conn,
+            `sudo -u www-data wp option update siteurl "${httpsSiteUrl}" --path="${wpDir}" 2>&1`,
+            60000
+          );
+
+          if (wpHomeUpdate.code === 0 && wpSiteUrlUpdate.code === 0) {
+            siteProtocol = 'https';
+            sslEnabled = true;
+            onProgress('ssl', 'completed', 'SSL certificate installed and WordPress URL updated to HTTPS');
+          } else {
+            const wpUrlUpdateFailureOutput = wpHomeUpdate.code !== 0
+              ? (wpHomeUpdate.stderr || wpHomeUpdate.stdout)
+              : (wpSiteUrlUpdate.stderr || wpSiteUrlUpdate.stdout);
+            const wpUrlUpdateDetails = summarizeCommandOutput(wpUrlUpdateFailureOutput);
+            onProgress(
+              'ssl',
+              'failed',
+              'SSL certificate installed, but WordPress URL update failed. Site remains on HTTP.',
+              wpUrlUpdateDetails || 'Run wp option update home/siteurl manually once SSL is confirmed.'
+            );
+          }
+        }
       }
     }
 
@@ -343,6 +394,8 @@ NGINXEOF`;
 
     return {
       success: true,
+      siteProtocol,
+      sslEnabled,
       adminPassword,
       dbName,
       dbUser,
@@ -353,6 +406,8 @@ NGINXEOF`;
     onProgress('error', 'failed', errorMessage);
     return {
       success: false,
+      siteProtocol: 'http',
+      sslEnabled: false,
       adminPassword: '',
       dbName: '',
       dbUser: '',
