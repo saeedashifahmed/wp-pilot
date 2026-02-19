@@ -3,9 +3,8 @@
 import { Rocket, Github } from 'lucide-react';
 
 const navLinks = [
+  { label: 'Home', href: 'https://rabbitbuilds.com/' },
   { label: 'About', href: 'https://rabbitbuilds.com/about' },
-  { label: 'Privacy Policy', href: 'https://rabbitbuilds.com/privacy-policy' },
-  { label: 'Terms of Service', href: 'https://rabbitbuilds.com/terms-of-service' },
   { label: 'Contact', href: 'https://rabbitbuilds.com/contact' },
 ];
 
