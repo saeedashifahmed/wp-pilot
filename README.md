@@ -93,6 +93,10 @@ docker run -p 3000:3000 wp-pilot
 - WordPress `DISALLOW_FILE_EDIT` is enabled by default
 - UFW firewall is configured to allow only SSH, HTTP, and HTTPS
 
+## Acknowledgements
+
+This tool is developed by [Rabbit Builds](https://rabbitbuilds.com/).
+
 ## License
 
 MIT
