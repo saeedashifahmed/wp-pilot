@@ -16,9 +16,9 @@ export const metadata: Metadata = {
   title: "WP Pilot — One-click WordPress Installer",
   description: "Deploy WordPress on any Ubuntu server with a single click. Installs Nginx, PHP, MariaDB, and the latest WordPress automatically.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
-    apple: "/favicon.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
   },
 };
 
