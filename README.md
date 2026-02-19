@@ -95,7 +95,7 @@ docker run -p 3000:3000 wp-pilot
 
 ## Acknowledgements
 
-This tool is developed by [Rabbit Builds](https://rabbitbuilds.com/).
+This tool is developed by [Rabbit Builds](https://rabbitbuilds.com/), led by Saeed Ashif Ahmed.
 
 ## License
 
