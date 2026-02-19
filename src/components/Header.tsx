@@ -39,7 +39,7 @@ export default function Header() {
             href="https://github.com/saeedashifahmed/wp-pilot"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-colors"
+            className="flex items-center justify-center w-9 h-9 rounded-lg text-gray-500 bg-gray-100 shadow-sm hover:text-gray-900 hover:bg-gray-200 transition-colors"
             aria-label="View source on GitHub"
             title="View source on GitHub"
           >
